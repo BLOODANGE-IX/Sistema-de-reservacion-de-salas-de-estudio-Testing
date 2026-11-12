@@ -1,5 +1,5 @@
-DB_NAME=calculadora
-DB_USER=calculadora-user
+DB_NAME=reservaciones
+DB_USER=reservaciones-user
 DB_USER_ADMIN=admin
 DB_PASSWORD=admin1234
 DB_ROOT_PASSWORD=admin1234

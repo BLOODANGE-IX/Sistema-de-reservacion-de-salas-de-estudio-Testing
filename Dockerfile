@@ -1,34 +1,40 @@
+
 FROM debian:bookworm-slim
 
-RUN apt-get update && apt-get upgrade -y
-RUN apt-get install -y \
-    apache2 \
+# Instalar dependencias del sistema para Django y MariaDB
+RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
     python3-dev \
     python3-venv \
     libmariadb-dev \
-    libapache2-mod-wsgi-py3 \
     pkg-config \
-    gcc
+    gcc \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
-# Configure timezone
+# Configurar zona horaria
 ENV TZ=America/Mexico_City
-RUN ln -snf  /etc/l/usr/share/zoneinfo/$TZocaltime && echo $TZ > /etc/timezone
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone
 
-
-
-COPY ./requirements.txt /app/
-
+# Directorio de trabajo
 WORKDIR /app
 
+# Copiar dependencias
+COPY ./requirements.txt /app/
+
+# Crear entorno virtual
 RUN python3 -m venv /env
-ENV PATH=$PATH:/env/bin/
 
+ENV PATH="/env/bin:$PATH"
 
-#RUN mkdir /app/media && chown :www-data /app/media -R && chmod 775 /app/media -R
-RUN /env/bin/pip install --upgrade pip
-RUN /env/bin/pip install -r /app/requirements.txt
+# Instalar dependencias
+RUN pip install --upgrade pip \
+    && pip install -r requirements.txt
 
+# Puerto de Django
+EXPOSE 8000
 
-CMD ["apachectl", "-D", "FOREGROUND"]
+# Iniciar servidor de desarrollo
+CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
