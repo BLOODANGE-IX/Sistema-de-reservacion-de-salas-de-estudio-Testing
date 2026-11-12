@@ -11,6 +11,12 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import environ
+import os
+
+env = environ.Env()
+# Lee el archivo .env que está en la raíz del proyecto (fuera de la carpeta app)
+environ.Env.read_env(os.path.join(Path(__file__).resolve().parent.parent.parent, '.env'))
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -25,7 +31,7 @@ SECRET_KEY = 'django-insecure-7kre%1^sawcyxd*ji0i$+cq#6_ou78*%uv$$sss9^980_4jd*a
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 
 # Application definition
@@ -37,6 +43,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'reservaciones'
 ]
 
 MIDDLEWARE = [

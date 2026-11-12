@@ -1,6 +1,7 @@
 Django
 mysqlclient
 pillow
+django-environ
 
 coverage
 flake8
