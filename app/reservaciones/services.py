@@ -1,6 +1,7 @@
 from django.db import transaction
 from datetime import datetime, timedelta, time
 from .models import Reservacion, Sala
+from django.utils import timezone
 
 def _convertir_a_time(valor):
     if isinstance(valor, str):
@@ -30,6 +31,14 @@ def crear_reservacion(usuario, sala, fecha, hora_inicio, hora_fin, asistentes, p
         raise ValueError("La sala no se encuentra disponible para reservación.")
     if asistentes > sala.capacidad:
         raise ValueError("El número de asistentes supera la capacidad de la sala.")
+
+    # RN-03: Validar que no sea fecha pasada
+    if fecha < timezone.now().date():
+        raise ValueError("La fecha no puede ser anterior al día actual.")
+
+    # Convertir a objetos datetime para calcular duraciones y traslapes
+    inicio_dt = datetime.combine(fecha, hora_inicio)
+    fin_dt = datetime.combine(fecha, hora_fin)
 
     # Bloqueo pesimista sobre la sala para evitar concurrencia
     Sala.objects.select_for_update().get(pk=sala.pk)

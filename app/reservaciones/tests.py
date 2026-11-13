@@ -11,6 +11,7 @@ from django.db import connection
 from django.test import TransactionTestCase
 from .services import crear_reservacion
 from django.urls import reverse
+from .services import crear_reservacion, cancelar_reservacion
 
 class ReservacionModelTest(TestCase):
     def setUp(self):
@@ -99,6 +100,24 @@ class ReservacionServiceTest(TestCase):
         self.user = User.objects.create_user(username='testuser3', password='password123')
         self.sala = Sala.objects.create(nombre='Sala Servicios', capacidad=10, ubicacion='Piso 3', activa=True)
         self.manana = timezone.now().date() + timedelta(days=1)
+
+    """RN-03: El servicio debe rechazar fechas anteriores al día actual."""
+    def test_RN_03_rechazar_fecha_pasada_en_servicio(self):
+        ayer = timezone.now().date() - timedelta(days=1)
+        
+        with self.assertRaises(ValueError) as context:
+            crear_reservacion(
+                usuario=self.user,
+                sala=self.sala,
+                fecha=ayer,
+                hora_inicio='10:00',
+                hora_fin='11:00',
+                asistentes=2,
+                proposito='Prueba de fecha pasada'
+            )
+            
+        # Verificamos que el mensaje de error sea el correcto
+        self.assertEqual(str(context.exception), "La fecha no puede ser anterior al día actual.")
 
     """UT-07: Rechazar duración menor a 30 min o mayor a 2 horas."""
     def test_rechazar_duracion_invalida(self):
@@ -236,3 +255,86 @@ class ReservacionViewTest(TestCase):
         reserva = Reservacion.objects.first()
         self.assertEqual(reserva.usuario, self.user)
         self.assertEqual(reserva.estado, 'VIGENTE')
+
+class CancelacionServiceTest(TestCase):
+    def setUp(self):
+        self.user1 = User.objects.create_user(username='user1', password='password123')
+        self.user2 = User.objects.create_user(username='user2', password='password123')
+        self.sala = Sala.objects.create(nombre='Sala Cancelaciones', capacidad=10, ubicacion='Piso 6', activa=True)
+        
+        # Creamos una fecha futura lejana para que pase la validación de fecha
+        self.manana = timezone.now().date() + timedelta(days=1)
+
+    def _crear_reserva_base(self):
+        return crear_reservacion(
+            usuario=self.user1, sala=self.sala, fecha=self.manana,
+            hora_inicio='10:00', hora_fin='11:00', asistentes=2, proposito='Reserva para cancelar'
+        )
+
+    """UT-13: Cancelar reservación propia, vigente y con anticipación válida."""
+    def test_cancelacion_valida(self):
+        reserva = self._crear_reserva_base()
+        
+        cancelar_reservacion(reserva, self.user1)
+        
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.estado, 'CANCELADA')
+        self.assertIsNotNone(reserva.fecha_cancelacion)
+
+    """UT-14: Rechazar cancelación de reservación ajena (RN-09)."""
+    def test_rechazar_cancelacion_ajena(self):
+        reserva = self._crear_reserva_base()
+        
+        with self.assertRaises(ValueError):
+            cancelar_reservacion(reserva, self.user2) # user2 intenta cancelar la de user1
+            
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.estado, 'VIGENTE')
+
+    """UT-15 y UT-16: Rechazar cancelación con 60 minutos o menos de anticipación (RN-11)."""
+    def test_rechazar_falta_anticipacion(self):
+        reserva = self._crear_reserva_base()
+        
+        # Simulamos que faltan exactamente 60 minutos alterando los datos en la BD
+        ahora = timezone.now()
+        hora_en_60_min = (ahora + timedelta(minutes=60)).time()
+        
+        # Si la reserva es hoy, le ponemos la hora de aquí a 60 mins
+        reserva.fecha = ahora.date()
+        reserva.hora_inicio = hora_en_60_min
+        reserva.save()
+
+        with self.assertRaises(ValueError):
+            cancelar_reservacion(reserva, self.user1)
+
+    """UT-17: Rechazar segunda cancelación y no modificar la fecha inicial (RN-10)."""
+    def test_rechazar_doble_cancelacion(self):
+        reserva = self._crear_reserva_base()
+        cancelar_reservacion(reserva, self.user1)
+        
+        reserva.refresh_from_db()
+        fecha_primera_cancelacion = reserva.fecha_cancelacion
+
+        # Intentamos cancelar de nuevo
+        with self.assertRaises(ValueError):
+            cancelar_reservacion(reserva, self.user1)
+
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.fecha_cancelacion, fecha_primera_cancelacion)
+
+    """UT-20: Reservar un horario, cancelarlo y volver a reservarlo (RN-12, RN-14)."""
+    def test_integracion_reservar_cancelar_reservar(self):
+        # 1. Reservamos
+        reserva1 = self._crear_reserva_base()
+        
+        # 2. Cancelamos
+        cancelar_reservacion(reserva1, self.user1)
+        
+        # 3. Intentamos reservar el mismo horario otra vez
+        reserva2 = crear_reservacion(
+            usuario=self.user2, sala=self.sala, fecha=self.manana,
+            hora_inicio='10:00', hora_fin='11:00', asistentes=2, proposito='Reserva despues de cancelacion'
+        )
+        
+        self.assertEqual(reserva2.estado, 'VIGENTE')
+        self.assertEqual(Reservacion.objects.filter(estado='VIGENTE').count(), 1)
