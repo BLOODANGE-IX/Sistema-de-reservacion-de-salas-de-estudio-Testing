@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from django.db import connection
 from django.test import TransactionTestCase
 from .services import crear_reservacion
+from django.urls import reverse
 
 class ReservacionModelTest(TestCase):
     def setUp(self):
@@ -198,3 +199,40 @@ class ReservacionConcurrencyTest(TransactionTestCase):
             sala=self.sala, fecha=self.manana, estado='VIGENTE'
         )
         self.assertEqual(reservas_vigentes.count(), 1)
+
+class ReservacionViewTest(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='testuser5', password='password123')
+        self.sala = Sala.objects.create(nombre='Sala Vistas', capacidad=10, ubicacion='Piso 5', activa=True)
+        self.manana = timezone.now().date() + timedelta(days=1)
+        self.url_crear = reverse('crear_reservacion') # Lo definiremos en urls.py
+
+    """UT-11: Impedir acceso anónimo al formulario."""
+    def test_impedir_acceso_anonimo(self):
+        response = self.client.get(self.url_crear)
+        # Debe redirigir al login (código 302)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/accounts/login/', response.url)
+
+    """UT-12: Crear reservación mediante POST válido."""
+    def test_crear_reservacion_post_valido(self):
+        self.client.login(username='testuser5', password='password123')
+        
+        response = self.client.post(self.url_crear, {
+            'sala': self.sala.id,
+            'fecha': self.manana,
+            'hora_inicio': '10:00',
+            'hora_fin': '11:00',
+            'asistentes': 2,
+            'proposito': 'Estudiar para el examen de TDD'
+        })
+        
+        # Debe redirigir a la lista de reservaciones (código 302)
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, reverse('lista_reservaciones'))
+        
+        # Verificar que se creó en la BD
+        self.assertEqual(Reservacion.objects.count(), 1)
+        reserva = Reservacion.objects.first()
+        self.assertEqual(reserva.usuario, self.user)
+        self.assertEqual(reserva.estado, 'VIGENTE')
