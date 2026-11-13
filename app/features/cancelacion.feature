@@ -13,14 +13,16 @@ Característica: Cancelar una reservación
     Y la sala vuelve a estar disponible para ese horario
 
   Escenario: Impedir que un usuario cancele una reservación ajena
-    Dado que existe una reservación vigente perteneciente a otro usuario
+    Dado que el usuario ha iniciado sesión
+    Y existe una reservación vigente perteneciente a otro usuario
     Y el usuario autenticado intenta cancelarla
     Entonces el sistema rechaza la operación
     Y mantiene la reservación en estado "VIGENTE"
     Y responde sin revelar información sensible de la reservación
 
   Escenario: Impedir cancelación fuera del periodo permitido
-    Dado que el usuario es propietario de una reservación vigente
+    Dado que el usuario ha iniciado sesión
+    Y que el usuario es propietario de una reservación vigente
     Y faltan 60 minutos o menos para su inicio
     Cuando intenta cancelarla
     Entonces el sistema rechaza la operación
