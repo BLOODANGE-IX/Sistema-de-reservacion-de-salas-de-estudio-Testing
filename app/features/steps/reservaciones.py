@@ -127,9 +127,23 @@ def step_impl(context):
 def step_impl(context):
     context.initial_count = Reservacion.objects.count()
     ayer = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
-    llenar_formulario(
-        context, context.sala_a.id, ayer, "10:00", "11:00", 2, "Fecha pasada"
-    )
+    
+    # En lugar de usar llenar_formulario, hacemos el proceso directo aquí
+    context.driver.get(f"{context.base_url}/nueva/")
+    WebDriverWait(context.driver, 10).until(EC.presence_of_element_located((By.NAME, "fecha")))
+    
+    context.driver.execute_script(f"document.getElementsByName('fecha')[0].value = '{ayer}';")
+    context.driver.execute_script("document.getElementsByName('hora_inicio')[0].value = '10:00';")
+    context.driver.execute_script("document.getElementsByName('hora_fin')[0].value = '11:00';")
+    
+    Select(context.driver.find_element(By.NAME, "sala")).select_by_value(str(context.sala_a.id))
+    context.driver.find_element(By.NAME, "asistentes").clear()
+    context.driver.find_element(By.NAME, "asistentes").send_keys("2")
+    context.driver.find_element(By.NAME, "proposito").clear()
+    context.driver.find_element(By.NAME, "proposito").send_keys("Fecha pasada")
+    
+    context.driver.find_element(By.XPATH, "//button[@type='submit']").click()
+    time_module.sleep(1)
 
 @then('muestra el mensaje de validación correspondiente')
 def step_impl(context):
