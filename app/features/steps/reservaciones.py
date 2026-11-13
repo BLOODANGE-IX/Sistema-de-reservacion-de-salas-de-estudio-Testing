@@ -12,12 +12,19 @@ def step_impl(context):
 
 @given('el usuario ha iniciado sesión')
 def step_impl(context):
-    context.driver.get(f"{context.base_url}/accounts/login/")
+    url_login = f"{context.base_url}/accounts/login/"
+    context.driver.get(url_login)
     
-    # Esperar a que cargue el formulario de login
-    WebDriverWait(context.driver, 10).until(
-        EC.presence_of_element_located((By.NAME, "username"))
-    )
+    try:
+        WebDriverWait(context.driver, 10).until(
+            EC.presence_of_element_located((By.NAME, "username"))
+        )
+    except Exception as e:
+        # Si falla, guardamos una foto de lo que Chrome ve
+        context.driver.save_screenshot("error_login.png")
+        print(f"--- ERROR: No se encontró el campo username en {url_login} ---")
+        print(f"Contenido HTML:\n{context.driver.page_source}")
+        raise e
     
     context.driver.find_element(By.NAME, "username").send_keys("bdd_user")
     context.driver.find_element(By.NAME, "password").send_keys("password123")
@@ -31,14 +38,16 @@ def step_impl(context):
 def step_impl(context):
     context.driver.get(f"{context.base_url}/nueva/")
     manana = date.today() + timedelta(days=1)
+    fecha_str = manana.strftime("%Y-%m-%d")
     
     WebDriverWait(context.driver, 10).until(
         EC.presence_of_element_located((By.NAME, "fecha"))
     )
     
-    context.driver.find_element(By.NAME, "fecha").send_keys(manana.strftime("%Y-%m-%d"))
-    context.driver.find_element(By.NAME, "hora_inicio").send_keys("10:00")
-    context.driver.find_element(By.NAME, "hora_fin").send_keys("11:00")
+    # Usamos JavaScript para establecer los valores directamente en los inputs de HTML5
+    context.driver.execute_script(f"document.getElementsByName('fecha')[0].value = '{fecha_str}';")
+    context.driver.execute_script("document.getElementsByName('hora_inicio')[0].value = '10:00';")
+    context.driver.execute_script("document.getElementsByName('hora_fin')[0].value = '11:00';")
 
 @when('captura un número de asistentes permitido y un propósito válido')
 def step_impl(context):
@@ -57,7 +66,14 @@ def step_impl(context):
 def step_impl(context):
     from reservaciones.models import Reservacion
     reserva = Reservacion.objects.first()
-    assert reserva is not None
+    
+    # Si no hay reserva, imprimimos el HTML de la página para ver el error
+    if reserva is None:
+        print("\n--- ¡NO SE GUARDÓ LA RESERVACIÓN! ---")
+        print("Revisando el HTML de la página para buscar errores de validación:")
+        print(context.driver.page_source)
+        assert False, "La reservación no se creó en la base de datos."
+        
     assert reserva.estado == 'VIGENTE'
 
 @then('muestra un mensaje de confirmación')

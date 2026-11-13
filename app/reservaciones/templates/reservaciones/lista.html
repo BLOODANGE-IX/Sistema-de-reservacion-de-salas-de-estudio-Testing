@@ -20,5 +20,34 @@
             </li>
         {% endfor %}
     </ul>
+
+    {% if messages %}
+        <ul class="messages">
+            {% for message in messages %}
+                <li{% if message.tags %} class="{{ message.tags }}"{% endif %}>{{ message }}</li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+    <!-- FIN DEL BLOQUE -->
+
+    <a href="{% url 'crear_reservacion' %}">Nueva Reservación</a>
+    <ul>
+        {% for reserva in reservaciones %}
+            <li>
+                {{ reserva.sala.nombre }} - {{ reserva.fecha }} 
+                ({{ reserva.hora_inicio }} a {{ reserva.hora_fin }}) 
+                [{{ reserva.estado }}]
+                
+                {% if reserva.estado == 'VIGENTE' %}
+                    <form action="{% url 'cancelar_reservacion' reserva.pk %}" method="post" style="display:inline;">
+                        {% csrf_token %}
+                        <button type="submit" onclick="return confirm('¿Seguro que deseas cancelar?')">Cancelar</button>
+                    </form>
+                {% endif %}
+            </li>
+        {% empty %}
+            <li>No tienes reservaciones.</li>
+        {% endfor %}
+    </ul>
 </body>
 </html>
