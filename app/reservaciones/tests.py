@@ -1,15 +1,12 @@
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 from django.contrib.auth.models import User
 from django.utils import timezone
-from datetime import timedelta
+from datetime import timedelta, date, time
 from django import forms
 from .forms import ReservacionForm
-from datetime import date, time
 from .models import Sala, Reservacion
 from concurrent.futures import ThreadPoolExecutor
 from django.db import connection
-from django.test import TransactionTestCase
-from .services import crear_reservacion
 from django.urls import reverse
 from .services import crear_reservacion, cancelar_reservacion
 
@@ -358,3 +355,64 @@ class CancelacionServiceTest(TestCase):
         
         self.assertEqual(reserva2.estado, 'VIGENTE')
         self.assertEqual(Reservacion.objects.filter(estado='VIGENTE').count(), 1)
+
+class CancelacionViewTest(TestCase):
+    def setUp(self):
+        self.user1 = User.objects.create_user(username='user1', password='password123')
+        self.user2 = User.objects.create_user(username='user2', password='password123')
+        self.sala = Sala.objects.create(nombre='Sala Vistas Cancel', capacidad=10, ubicacion='Piso 7', activa=True)
+        self.manana = timezone.now().date() + timedelta(days=1)
+        
+        self.reserva = crear_reservacion(
+            usuario=self.user1, sala=self.sala, fecha=self.manana,
+            hora_inicio='10:00', hora_fin='11:00', asistentes=2, proposito='Reserva para vistas'
+        )
+        self.url_cancelar = reverse('cancelar_reservacion', args=[self.reserva.pk])
+
+    def test_mostrar_canceladas_en_historial(self):
+        self.client.login(username='user1', password='password123')
+        
+        # 1. Cancelamos la reserva que se creó en el setUp
+        self.reserva.estado = 'CANCELADA'
+        self.reserva.fecha_cancelacion = timezone.now()
+        self.reserva.save()
+
+        # 2. Consultamos la vista de historial (la lista)
+        response = self.client.get(reverse('lista_reservaciones'))
+
+        # 3. Verificamos que el historial devuelva la reserva (aunque esté cancelada)
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "CANCELADA") # Busca el texto en el HTML
+        self.assertEqual(len(response.context['reservaciones']), 1)
+        
+        # Opcional: verificar que es la misma reserva
+        reserva_en_historial = response.context['reservaciones'][0]
+        self.assertEqual(reserva_en_historial.id, self.reserva.id)
+
+    """UT-18: Impedir cancelación mediante solicitud anónima."""
+    def test_impedir_cancelacion_anonima(self):
+        response = self.client.post(self.url_cancelar)
+        
+        # Debe redirigir al login
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('/accounts/login/', response.url)
+        
+        # La reserva sigue vigente
+        self.reserva.refresh_from_db()
+        self.assertEqual(self.reserva.estado, 'VIGENTE')
+
+    """UT-19: Impedir que una petición manipulada cancele registro ajeno."""
+    def test_impedir_cancelacion_ajena_por_post(self):
+        # Inicia sesión el user2 (que NO es el dueño)
+        self.client.login(username='user2', password='password123')
+        
+        # Intenta cancelar la reserva del user1 por POST
+        response = self.client.post(self.url_cancelar)
+        
+        # Redirige a la lista pero con un mensaje de error
+        self.assertEqual(response.status_code, 302)
+        
+        # La reserva NO debe haberse cancelado
+        self.reserva.refresh_from_db()
+        self.assertEqual(self.reserva.estado, 'VIGENTE')
+        self.assertIsNone(self.reserva.fecha_cancelacion)

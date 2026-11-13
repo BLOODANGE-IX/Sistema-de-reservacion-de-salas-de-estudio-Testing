@@ -2,7 +2,7 @@ from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from .forms import ReservacionForm
-from .services import crear_reservacion
+from .services import crear_reservacion, cancelar_reservacion
 from .models import Reservacion
 
 @login_required
@@ -38,5 +38,14 @@ def crear_reservacion_view(request):
 
 @login_required
 def cancelar_reservacion_view(request, pk):
-    # Lo implementaremos en el siguiente ciclo TDD (HU-02)
-    pass
+    if request.method == 'POST': # Solo aceptamos POST por seguridad (RT-12)
+        try:
+            reserva = Reservacion.objects.get(pk=pk)
+            cancelar_reservacion(reserva, request.user)
+            messages.success(request, "Reservación cancelada exitosamente.")
+        except Reservacion.DoesNotExist:
+            messages.error(request, "La reservación no existe.")
+        except ValueError as e:
+            messages.error(request, str(e))
+            
+    return redirect('lista_reservaciones')
