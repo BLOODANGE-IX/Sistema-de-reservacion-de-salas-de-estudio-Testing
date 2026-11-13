@@ -71,3 +71,33 @@ def crear_reservacion(usuario, sala, fecha, hora_inicio, hora_fin, asistentes, p
     )
     
     return reservacion
+
+@transaction.atomic
+def cancelar_reservacion(reservacion, usuario):
+    """
+    Cancela una reservación vigente aplicando las reglas de negocio HU-02.
+    """
+    # RN-09: Solo el propietario puede cancelar
+    if reservacion.usuario != usuario:
+        raise ValueError("No tienes permiso para cancelar esta reservación.")
+
+    # RN-10: Solo se pueden cancelar reservaciones VIGENTES
+    if reservacion.estado != 'VIGENTE':
+        raise ValueError("La reservación ya fue cancelada.")
+
+    # RN-11: Deben faltar más de 60 minutos para el inicio
+    ahora = timezone.now()
+    # Aseguramos que la fecha y hora de la reservación tengan zona horaria
+    inicio_dt = timezone.make_aware(datetime.combine(reservacion.fecha, reservacion.hora_inicio))
+    
+    tiempo_restante = inicio_dt - ahora
+    
+    if tiempo_restante <= timedelta(minutes=60):
+        raise ValueError("El periodo de cancelación ha concluido. Faltan 60 minutos o menos.")
+
+    # RN-12, RN-13: Cambiamos estado y registramos fecha de cancelación
+    reservacion.estado = 'CANCELADA'
+    reservacion.fecha_cancelacion = ahora
+    reservacion.save()
+
+    return reservacion

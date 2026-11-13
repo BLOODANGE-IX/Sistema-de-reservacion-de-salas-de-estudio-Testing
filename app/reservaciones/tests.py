@@ -291,21 +291,41 @@ class CancelacionServiceTest(TestCase):
         reserva.refresh_from_db()
         self.assertEqual(reserva.estado, 'VIGENTE')
 
-    """UT-15 y UT-16: Rechazar cancelación con 60 minutos o menos de anticipación (RN-11)."""
-    def test_rechazar_falta_anticipacion(self):
+    """UT-15: Rechazar cancelación con 60 minutos exactos de anticipación."""
+    def test_rechazar_exactamente_60_minutos(self):
         reserva = self._crear_reserva_base()
         
-        # Simulamos que faltan exactamente 60 minutos alterando los datos en la BD
         ahora = timezone.now()
-        hora_en_60_min = (ahora + timedelta(minutes=60)).time()
+        # Sumamos exactamente 60 minutos
+        hora_exacta = (ahora + timedelta(minutes=60)).time()
         
-        # Si la reserva es hoy, le ponemos la hora de aquí a 60 mins
         reserva.fecha = ahora.date()
-        reserva.hora_inicio = hora_en_60_min
+        reserva.hora_inicio = hora_exacta
         reserva.save()
 
         with self.assertRaises(ValueError):
             cancelar_reservacion(reserva, self.user1)
+            
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.estado, 'VIGENTE')
+
+    """UT-16: Rechazar cancelación con menos de 60 minutos de anticipación."""
+    def test_rechazar_menos_de_60_minutos(self):
+        reserva = self._crear_reserva_base()
+        
+        ahora = timezone.now()
+        # Sumamos 30 minutos (menos de 60)
+        hora_menor = (ahora + timedelta(minutes=30)).time()
+        
+        reserva.fecha = ahora.date()
+        reserva.hora_inicio = hora_menor
+        reserva.save()
+
+        with self.assertRaises(ValueError):
+            cancelar_reservacion(reserva, self.user1)
+            
+        reserva.refresh_from_db()
+        self.assertEqual(reserva.estado, 'VIGENTE')
 
     """UT-17: Rechazar segunda cancelación y no modificar la fecha inicial (RN-10)."""
     def test_rechazar_doble_cancelacion(self):
