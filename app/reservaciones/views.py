@@ -38,7 +38,7 @@ def crear_reservacion_view(request):
 
 @login_required
 def cancelar_reservacion_view(request, pk):
-    if request.method == 'POST': # Solo aceptamos POST por seguridad (RT-12)
+    if request.method == 'POST':
         try:
             reserva = Reservacion.objects.get(pk=pk)
             cancelar_reservacion(reserva, request.user)
@@ -46,6 +46,5 @@ def cancelar_reservacion_view(request, pk):
         except Reservacion.DoesNotExist:
             messages.error(request, "La reservación no existe.")
         except ValueError as e:
-            messages.error(request, str(e))
-            
+            messages.error(request, str(e))   
     return redirect('lista_reservaciones')

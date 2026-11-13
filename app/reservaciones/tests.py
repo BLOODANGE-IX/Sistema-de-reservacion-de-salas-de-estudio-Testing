@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from django.db import connection
 from django.urls import reverse
 from .services import crear_reservacion, cancelar_reservacion
+import threading
 
 class ReservacionModelTest(TestCase):
     def setUp(self):
@@ -92,6 +93,63 @@ class ReservacionFormTest(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn('hora_fin', form.errors)
 
+    def test_rechazar_sala_inactiva(self):
+        sala_inactiva = Sala.objects.create(nombre='Inactiva', capacidad=4, ubicacion='X', activa=False)
+        form = ReservacionForm(data={
+            'sala': sala_inactiva.id, 'fecha': self.manana,
+            'hora_inicio': '10:00', 'hora_fin': '11:00',
+            'asistentes': 2, 'proposito': 'Estudiar para el examen de TDD'
+        })
+        self.assertFalse(form.is_valid())
+        self.assertIn('sala', form.errors)
+
+    def test_rechazar_capacidad_excedida(self):
+        form = ReservacionForm(data={
+            'sala': self.sala.id, 'fecha': self.manana,
+            'hora_inicio': '10:00', 'hora_fin': '11:00',
+            'asistentes': 10, 'proposito': 'Estudiar para el examen de TDD' # Sala tiene cap 4
+        })
+        self.assertFalse(form.is_valid())
+        self.assertIn('asistentes', form.errors)
+
+    def test_duracion_invalida(self):
+        # Mínima (15 mins)
+        form1 = ReservacionForm(data={
+            'sala': self.sala.id, 'fecha': self.manana,
+            'hora_inicio': '10:00', 'hora_fin': '10:15',
+            'asistentes': 2, 'proposito': 'Estudiar para el examen de TDD'
+        })
+        self.assertFalse(form1.is_valid())
+        self.assertIn('hora_fin', form1.errors)
+        
+        # Máxima (3 horas)
+        form2 = ReservacionForm(data={
+            'sala': self.sala.id, 'fecha': self.manana,
+            'hora_inicio': '10:00', 'hora_fin': '13:00',
+            'asistentes': 2, 'proposito': 'Estudiar para el examen de TDD'
+        })
+        self.assertFalse(form2.is_valid())
+        self.assertIn('hora_fin', form2.errors)
+
+    def test_horario_institucional_invalido(self):
+        # Inicio antes de 08:00
+        form1 = ReservacionForm(data={
+            'sala': self.sala.id, 'fecha': self.manana,
+            'hora_inicio': '07:00', 'hora_fin': '08:00',
+            'asistentes': 2, 'proposito': 'Estudiar para el examen de TDD'
+        })
+        self.assertFalse(form1.is_valid())
+        self.assertIn('hora_inicio', form1.errors)
+        
+        # Fin después de 20:00
+        form2 = ReservacionForm(data={
+            'sala': self.sala.id, 'fecha': self.manana,
+            'hora_inicio': '19:30', 'hora_fin': '21:00',
+            'asistentes': 2, 'proposito': 'Estudiar para el examen de TDD'
+        })
+        self.assertFalse(form2.is_valid())
+        self.assertIn('hora_fin', form2.errors)
+
 class ReservacionServiceTest(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username='testuser3', password='password123')
@@ -99,7 +157,7 @@ class ReservacionServiceTest(TestCase):
         self.manana = timezone.now().date() + timedelta(days=1)
 
     """RN-03: El servicio debe rechazar fechas anteriores al día actual."""
-    def test_RN_03_rechazar_fecha_pasada_en_servicio(self):
+    def test_rechazar_fecha_pasada_en_servicio(self):
         ayer = timezone.now().date() - timedelta(days=1)
         
         with self.assertRaises(ValueError) as context:
@@ -169,7 +227,7 @@ class ReservacionServiceTest(TestCase):
         self.assertEqual(Reservacion.objects.filter(estado='VIGENTE').count(), 2)
 
     """UT-10: Ignorar reservaciones canceladas al calcular disponibilidad."""
-    def test_UT_10_ignorar_canceladas(self):
+    def test_ignorar_canceladas(self):
         r1 = crear_reservacion(
             usuario=self.user, sala=self.sala, fecha=self.manana,
             hora_inicio='10:00', hora_fin='11:00', asistentes=2, proposito='A cancelar'
@@ -185,6 +243,21 @@ class ReservacionServiceTest(TestCase):
         )
         self.assertEqual(r2.estado, 'VIGENTE')
 
+    def test_service_rechazar_sala_inactiva(self):
+        sala_inactiva = Sala.objects.create(nombre='Inactiva', capacidad=4, ubicacion='X', activa=False)
+        with self.assertRaises(ValueError):
+            crear_reservacion(
+                usuario=self.user, sala=sala_inactiva, fecha=self.manana,
+                hora_inicio='10:00', hora_fin='11:00', asistentes=2, proposito='Test'
+            )
+
+    def test_service_rechazar_capacidad_excedida(self):
+        with self.assertRaises(ValueError):
+            crear_reservacion(
+                usuario=self.user, sala=self.sala, fecha=self.manana,
+                hora_inicio='10:00', hora_fin='11:00', asistentes=99, proposito='Test'
+            )
+
 class ReservacionConcurrencyTest(TransactionTestCase):
     """IT-01: Prueba de integración para condiciones de carrera."""
     def setUp(self):
@@ -194,26 +267,37 @@ class ReservacionConcurrencyTest(TransactionTestCase):
 
     """IT-01: Enviar dos solicitudes concurrentes incompatibles -> solo una persiste."""
     def test_doble_reservacion_concurrente(self):
+        barrier = threading.Barrier(2)
+        resultados = []
+
         def intentar_reservar():
             try:
+                barrier.wait() # Hace que ambos hilos disparen exactamente al mismo tiempo
                 crear_reservacion(
                     usuario=self.user, sala=self.sala, fecha=self.manana,
                     hora_inicio='10:00', hora_fin='11:00', asistentes=2, proposito='Concurrente'
                 )
+                resultados.append('exito')
             except ValueError:
-                pass # Simula que la segunda solicitud recibe un error controlado
+                resultados.append('error_controlado')
+            except Exception as e:
+                resultados.append(f'error_db: {e}') # Captura errores de BD
             finally:
                 connection.close() # Importante cerrar conexión en hilos
 
-        # Ejecutamos dos hilos al mismo tiempo
         with ThreadPoolExecutor(max_workers=2) as executor:
             executor.submit(intentar_reservar)
             executor.submit(intentar_reservar)
 
-        # Al final, solo debe existir UNA reservación vigente en la BD
+        # Verificar que solo exista UNA reservación vigente
         reservas_vigentes = Reservacion.objects.filter(
             sala=self.sala, fecha=self.manana, estado='VIGENTE'
         )
+        
+        # Si falla, imprimimos qué pasó en cada hilo
+        if reservas_vigentes.count() != 1:
+            print(f"\n--- RESULTADOS DE LOS HILOS: {resultados} ---")
+            
         self.assertEqual(reservas_vigentes.count(), 1)
 
 class ReservacionViewTest(TestCase):
@@ -252,6 +336,26 @@ class ReservacionViewTest(TestCase):
         reserva = Reservacion.objects.first()
         self.assertEqual(reserva.usuario, self.user)
         self.assertEqual(reserva.estado, 'VIGENTE')
+
+    def test_error_traslape(self):
+        self.client.login(username='testuser5', password='password123')
+        # Creamos una reserva previa para forzar el traslape
+        crear_reservacion(
+            usuario=self.user, sala=self.sala, fecha=self.manana,
+            hora_inicio='10:00', hora_fin='11:00', asistentes=2, proposito='Previa'
+        )
+        # Intentamos crear otra en el mismo horario
+        response = self.client.post(self.url_crear, {
+            'sala': self.sala.id, 'fecha': self.manana,
+            'hora_inicio': '10:00', 'hora_fin': '11:00',
+            'asistentes': 2, 'proposito': 'Estudiar para el examen de TDD'
+        })
+        self.assertEqual(response.status_code, 200) # Se queda en el formulario con el error
+
+    def test_get_formulario(self):
+        self.client.login(username='testuser5', password='password123')
+        response = self.client.get(self.url_crear)
+        self.assertEqual(response.status_code, 200)
 
 class CancelacionServiceTest(TestCase):
     def setUp(self):
@@ -416,3 +520,42 @@ class CancelacionViewTest(TestCase):
         self.reserva.refresh_from_db()
         self.assertEqual(self.reserva.estado, 'VIGENTE')
         self.assertIsNone(self.reserva.fecha_cancelacion)
+
+    def test_error_reserva_no_existe(self):
+        self.client.login(username='user1', password='password123')
+        response = self.client.post(reverse('cancelar_reservacion', args=[9999]))
+        self.assertRedirects(response, reverse('lista_reservaciones'))
+
+    def test_error_cancelacion_invalida(self):
+        self.client.login(username='user1', password='password123')
+        # Hacemos que falten menos de 60 mins
+        ahora = timezone.now()
+        self.reserva.fecha = ahora.date()
+        self.reserva.hora_inicio = (ahora + timedelta(minutes=30)).time()
+        self.reserva.save()
+        
+        response = self.client.post(self.url_cancelar)
+        self.assertRedirects(response, reverse('lista_reservaciones'))
+
+    def test_cancelar_inexistente(self):
+        self.client.login(username='user1', password='password123')
+        # Intentamos cancelar la reservación con ID 9999 (que no existe)
+        response = self.client.post(reverse('cancelar_reservacion', args=[9999]))
+        self.assertRedirects(response, reverse('lista_reservaciones'))
+
+    def test_cancelar_inexistente(self):
+        self.client.login(username='user1', password='password123')
+        response = self.client.post(reverse('cancelar_reservacion', args=[9999]))
+        self.assertRedirects(response, reverse('lista_reservaciones'))
+
+    def test_view_cancelar_exitoso(self):
+        self.client.login(username='user1', password='password123')
+        
+        # user1 cancela su propia reserva (futura, más de 60 min)
+        response = self.client.post(reverse('cancelar_reservacion', args=[self.reserva.pk]))
+        
+        self.assertRedirects(response, reverse('lista_reservaciones'))
+        
+        # Verificamos que efectivamente se canceló
+        self.reserva.refresh_from_db()
+        self.assertEqual(self.reserva.estado, 'CANCELADA')

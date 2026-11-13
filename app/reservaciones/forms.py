@@ -34,7 +34,6 @@ class ReservacionForm(forms.ModelForm):
             raise forms.ValidationError("Debe haber al menos 1 asistente.")
         return asistentes
 
-
     def clean(self):
         cleaned_data = super().clean()
         sala = cleaned_data.get('sala')

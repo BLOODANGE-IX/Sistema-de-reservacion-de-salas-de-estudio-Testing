@@ -1,0 +1,19 @@
+[run]
+source = .
+omit =
+    */migrations/*
+    */tests.py
+    manage.py
+    config/settings.py
+    config/wsgi.py
+    config/asgi.py
+    */apps.py
+    */admin.py
+    features/*
+    .venv/*
+
+[report]
+fail_under = 100
+exclude_lines =
+    pragma: no cover
+    def __str__

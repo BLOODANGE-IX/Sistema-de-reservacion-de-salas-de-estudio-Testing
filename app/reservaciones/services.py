@@ -1,5 +1,5 @@
 from django.db import transaction
-from datetime import datetime, timedelta, time
+from datetime import datetime, timedelta
 from .models import Reservacion, Sala
 from django.utils import timezone
 
